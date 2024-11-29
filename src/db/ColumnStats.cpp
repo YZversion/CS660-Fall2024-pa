@@ -3,87 +3,100 @@
 using namespace db;
 
 ColumnStats::ColumnStats(unsigned buckets, int min, int max)
-  : buckets(buckets), min(min), max(max), histogram(buckets, 0), totalValues(0)
-// TODO pa4: some code goes here
-{
+    : buckets(buckets), min(min), max(max), histogram(buckets, 0), totalValues(0)
   // TODO pa4: some code goes here
-  bucketWidth = static_cast<double>(max - min + 1) / buckets;
+  {
+    // TODO pa4: some code goes here
+    bw = (max - min + buckets) / buckets;
 }
 
 void ColumnStats::addValue(int v) {
-  // TODO pa4: some code goes here
-  if (v > max || v < min) {
-    // Value out of range, ignore it
-    return;
-  }
-  unsigned bucketIndex = static_cast<unsigned>((v - min) / bucketWidth);
-  //bucket index bounded
-  bucketIndex = std::min(bucketIndex, buckets - 1);
-  histogram[bucketIndex] += 1;
-  totalValues += 1;
+    // TODO pa4: some code goes here
+    if (v > max || v < min) {
+      // Value out of range, ignore it
+      return;
+    }
+    unsigned bucketIndex = static_cast<unsigned>((v - min) / bw);
+    //bucket index bounded
+    bucketIndex = std::min(bucketIndex, buckets - 1);
+    histogram[bucketIndex] += 1;
+    totalValues += 1;
 }
 
 size_t ColumnStats::estimateCardinality(PredicateOp op, int v) const {
-  if (v < min) {
-    if (op == PredicateOp::GT) {
-      return totalValues;
-    } else if (op == PredicateOp::LT) {
-      return 0;
-    } else if (op == PredicateOp::EQ) {
-      return 0;
-    }
+    if (v < min) {
+      if (op == PredicateOp::GT) {
+          return totalValues; // All values are greater than v
+      } else if (op == PredicateOp::LT) {
+          return 0; // No values are less than v
+      } else if (op == PredicateOp::EQ || op == PredicateOp::LE || op == PredicateOp::GE) {
+          return 0; // No values are equal to, less than or equal, or greater than or equal to v
+      } else if (op == PredicateOp::NE) {
+          return totalValues; // All values are not equal to v
+      }
   }
   if (v > max) {
-    if (op == PredicateOp::GT) {
-      return 0;
-    } else if (op == PredicateOp::LT) {
-      return totalValues;
-    } else if (op == PredicateOp::EQ) {
-      return 0;
-    }
+      if (op == PredicateOp::GT) {
+          return 0; // No values are greater than v
+      } else if (op == PredicateOp::LT) {
+          return totalValues; // All values are less than v
+      } else if (op == PredicateOp::EQ || op == PredicateOp::LE || op == PredicateOp::GE) {
+          return 0; // No values are equal to, less than or equal, or greater than or equal to v
+      } else if (op == PredicateOp::NE) {
+          return totalValues; // All values are not equal to v
+      }
   }
-  // TODO pa4: some code goes here
-  unsigned bucketIndex = static_cast<unsigned>((v - min) / bucketWidth);
-  bucketIndex = std::min(bucketIndex, buckets - 1); // Ensure the index is within bounds
-  double bucketStart = min + bucketIndex * bucketWidth;
-  double bucketEnd = bucketStart + bucketWidth;
-  int bucketHeight = histogram[bucketIndex];
-  size_t estimatedCardinality = 0;
+
+  unsigned bucketIndex = (v - min) / bw;
+  int all = 0;
+  int vInBucketIndex = (v - min) - (bucketIndex * bw);
+
+  for (int i = 0; i < buckets; i++) {
+      all += histogram[i];
+  }
 
   switch (op) {
-  case PredicateOp::EQ: {
-    if (bucketWidth == 0) {
-      return 0;
-    }
-    double selectivity = 1.0 / bucketWidth;
-    estimatedCardinality = static_cast<size_t>(bucketHeight * selectivity);
-    break;
+      case PredicateOp::EQ: {
+          return histogram[bucketIndex] / bw;
+      }
+      case PredicateOp::NE: {
+          return all - histogram[bucketIndex] / bw;
+      }
+      case PredicateOp::LT: {
+          int ans = 0;
+          for (int i = 0; i < bucketIndex; i++) {
+              ans += histogram[i];
+          }
+          ans += histogram[bucketIndex] * vInBucketIndex / bw;
+          return ans;
+      }
+      case PredicateOp::LE: {
+          int ans = 0;
+          for (int i = 0; i < bucketIndex; i++) {
+              ans += histogram[i];
+          }
+          ans += histogram[bucketIndex] * (vInBucketIndex + 1) / bw;
+          return ans;
+      }
+      case PredicateOp::GT: {
+          int ans = 0;
+          for (int i = bucketIndex + 1; i < buckets; i++) {
+              ans += histogram[i];
+          }
+          ans += histogram[bucketIndex] * (bw - vInBucketIndex - 1) / bw;
+          return ans;
+      }
+      case PredicateOp::GE: {
+          int ans = 0;
+          ans += histogram[bucketIndex] * (bw - vInBucketIndex) / bw;
+          for (int i = bucketIndex + 1; i < buckets; i++) {
+              ans += histogram[i];
+          }
+          return ans;
+      }
+      default:
+          break;
   }
-  case PredicateOp::GT: {
-    if (bucketWidth == 0) {
-      return 0;
-    }
-    double fractionInBucket = (bucketEnd - v) / bucketWidth;
-    estimatedCardinality += static_cast<size_t>(bucketHeight * fractionInBucket);
-    for (unsigned i = bucketIndex + 1; i < buckets; ++i) {
-      estimatedCardinality += histogram[i];
-    }
-    break;
-  }
-  case PredicateOp::LT: {
-    if (bucketWidth == 0) {
-      return 0;
-    }
-    double fractionInBucket = (v - bucketStart) / bucketWidth;
-    estimatedCardinality += static_cast<size_t>(bucketHeight * fractionInBucket);
-    for (unsigned i = 0; i < bucketIndex; ++i) {
-      estimatedCardinality += histogram[i];
-    }
-    break;
-  }
-  default:
-    // Handle other cases as needed
-      break;
-  }
-  return estimatedCardinality;
+  return 0;
 }
+
