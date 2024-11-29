@@ -25,78 +25,79 @@ void ColumnStats::addValue(int v) {
 
 size_t ColumnStats::estimateCardinality(PredicateOp op, int v) const {
     if (v < min) {
-      if (op == PredicateOp::GT) {
-          return totalValues; // All values are greater than v
-      } else if (op == PredicateOp::LT) {
-          return 0; // No values are less than v
-      } else if (op == PredicateOp::EQ || op == PredicateOp::LE || op == PredicateOp::GE) {
-          return 0; // No values are equal to, less than or equal, or greater than or equal to v
-      } else if (op == PredicateOp::NE) {
-          return totalValues; // All values are not equal to v
-      }
-  }
-  if (v > max) {
-      if (op == PredicateOp::GT) {
-          return 0; // No values are greater than v
-      } else if (op == PredicateOp::LT) {
-          return totalValues; // All values are less than v
-      } else if (op == PredicateOp::EQ || op == PredicateOp::LE || op == PredicateOp::GE) {
-          return 0; // No values are equal to, less than or equal, or greater than or equal to v
-      } else if (op == PredicateOp::NE) {
-          return totalValues; // All values are not equal to v
-      }
-  }
+        switch (op) {
+            case PredicateOp::GT:
+            case PredicateOp::GE:
+            case PredicateOp::NE:
+                return totalValues;
+            case PredicateOp::LT:
+            case PredicateOp::LE:
+            case PredicateOp::EQ:
+                return 0;
+        }
+    }
 
-  unsigned bucketIndex = (v - min) / bw;
-  int all = 0;
-  int vInBucketIndex = (v - min) - (bucketIndex * bw);
+    if (v > max) {
+        switch (op) {
+            case PredicateOp::LT:
+            case PredicateOp::LE:
+            case PredicateOp::NE:
+                return totalValues;
+            case PredicateOp::GT:
+            case PredicateOp::GE:
+            case PredicateOp::EQ:
+                return 0;
+        }
+    }
 
-  for (int i = 0; i < buckets; i++) {
-      all += histogram[i];
-  }
+    int bucketIndex = (v - min) / bw;
+    int vInBucketIndex = (v - min) % bw;
+    if (bucketIndex < 0) {
+        bucketIndex = 0;
+    } else if (bucketIndex >= buckets) {
+        bucketIndex = buckets - 1;
+    }
 
-  switch (op) {
-      case PredicateOp::EQ: {
-          return histogram[bucketIndex] / bw;
-      }
-      case PredicateOp::NE: {
-          return all - histogram[bucketIndex] / bw;
-      }
-      case PredicateOp::LT: {
-          int ans = 0;
-          for (int i = 0; i < bucketIndex; i++) {
-              ans += histogram[i];
-          }
-          ans += histogram[bucketIndex] * vInBucketIndex / bw;
-          return ans;
-      }
-      case PredicateOp::LE: {
-          int ans = 0;
-          for (int i = 0; i < bucketIndex; i++) {
-              ans += histogram[i];
-          }
-          ans += histogram[bucketIndex] * (vInBucketIndex + 1) / bw;
-          return ans;
-      }
-      case PredicateOp::GT: {
-          int ans = 0;
-          for (int i = bucketIndex + 1; i < buckets; i++) {
-              ans += histogram[i];
-          }
-          ans += histogram[bucketIndex] * (bw - vInBucketIndex - 1) / bw;
-          return ans;
-      }
-      case PredicateOp::GE: {
-          int ans = 0;
-          ans += histogram[bucketIndex] * (bw - vInBucketIndex) / bw;
-          for (int i = bucketIndex + 1; i < buckets; i++) {
-              ans += histogram[i];
-          }
-          return ans;
-      }
-      default:
-          break;
-  }
-  return 0;
+    switch (op) {
+        case PredicateOp::EQ: {
+            return histogram[bucketIndex] / bw;
+        }
+        case PredicateOp::NE: {
+            return totalValues - (histogram[bucketIndex] / bw);
+        }
+        case PredicateOp::LT: {
+            int ans = 0;
+            for (int i = 0; i < bucketIndex; i++) {
+                ans += histogram[i];
+            }
+            ans += histogram[bucketIndex] * vInBucketIndex / bw;
+            return ans;
+        }
+        case PredicateOp::LE: {
+            int ans = 0;
+            for (int i = 0; i < bucketIndex; i++) {
+                ans += histogram[i];
+            }
+            ans += histogram[bucketIndex] * (vInBucketIndex + 1) / bw;
+            return ans;
+        }
+        case PredicateOp::GT: {
+            int ans = 0;
+            ans += histogram[bucketIndex] * (bw - vInBucketIndex - 1) / bw;
+            for (int i = bucketIndex + 1; i < buckets; i++) {
+                ans += histogram[i];
+            }
+            return ans;
+        }
+        case PredicateOp::GE: {
+            int ans = 0;
+            ans += histogram[bucketIndex] * (bw - vInBucketIndex) / bw;
+            for (int i = bucketIndex + 1; i < buckets; i++) {
+                ans += histogram[i];
+            }
+            return ans;
+        }
+    }
+    return 0;
 }
 
